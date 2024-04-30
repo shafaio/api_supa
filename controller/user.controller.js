@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { z } from "zod";
+import bcrypt from "bcrypt";
 
 const prisma = new PrismaClient();
 
@@ -21,30 +22,37 @@ const userController = {
 
   createUser: async (req, res) => {
     try {
-      const validate = UserSchema.parse(req.body);
+      const validationResult = UserSchema.safeParse(req.body);
 
-      if (!validate.success) {
-        throw validate.error;
+      if (!validationResult.success) {
+        res
+          .status(400)
+          .json({ errors: validationResult.error.flatten().fieldErrors });
+        return;
       }
+
+      const { email, username, password } = validationResult.data;
+
+      const hashedPassword = await bcrypt.hash(password, 10);
 
       const user = await prisma.user.create({
         data: {
-          email: validate.email,
-          username: validate.username,
-          password: validate.password,
+          email: email || "",
+          username,
+          password: hashedPassword,
         },
       });
 
-      res.status(201).json(user);
+      res.status(201).json({
+        message: "Success Create User",
+        data: user,
+      });
     } catch (error) {
-      if (error instanceof z.ZodError) {
-        const errorMessage = error.flatten().fieldErrors;
-        res.status(400).json({ error: errorMessage });
-      } else {
-        // Tangani kesalahan lainnya
-        console.error(error);
-        res.status(500).json({ error: "Internal server error" });
+      if (error.code === "P2002") {
+        res.status(400).json({ error: "Email telah digunakan" });
+        return;
       }
+      res.status(500).json({ error: "Kesalahan server internal" });
     }
   },
 };
